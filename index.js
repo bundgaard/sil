@@ -7,22 +7,22 @@ class Token {
 }
 
 class Lexer {
+    error() {
+        throw Error("Invalid character");
+    }
+    advance() {
+        this.pos++;
+        if (this.pos > this.text.length - 1) {
+            this.currentChar = null;
+        } else {
+            this.currentChar = this.text[this.pos];
+        }
+    }
     constructor(text, debug) {
         this.text = text;
         this.debug = debug;
         this.pos = 0;
         this.currentChar = this.text[this.pos];
-        this.error = () => {
-            throw Error("Invalid character");
-        };
-        this.advance = () => {
-            this.pos++;
-            if (this.pos > this.text.length - 1) {
-                this.currentChar = null;
-            } else {
-                this.currentChar = this.text[this.pos];
-            }
-        };
         this.skipWhitespace = () => {
             while (this.currentChar !== null && /\s/.test(this.currentChar)) {
                 this.advance();
@@ -64,25 +64,25 @@ class Lexer {
                 if (/[a-zA-Z]/.test(this.currentChar)) {
                     if (this.debug)
                         console.log("returning IDENTIFIER token");
-                    return new Token(ID, this.identifier());
+                    return new Token(IDENTIFIER, this.identifier());
                 }
                 if ("+" === this.currentChar) {
                     this.advance();
                     if (this.debug)
                         console.log("returning PLUS token");
-                    return new Token(PLUS, "+");
+                    return new Token(OPERATOR, "+");
                 }
                 if ("-" === this.currentChar) {
                     this.advance();
                     if (this.debug)
                         console.log("returning MINUS token");
-                    return new Token(MINUS, "-");
+                    return new Token(OPERATOR, "-");
                 }
                 if ("*" === this.currentChar) {
                     this.advance();
                     if (this.debug)
                         console.log("returning MUL token");
-                    return new Token(MUL, "*");
+                    return new Token(OPERATOR, "*");
                 }
                 if ("/" === this.currentChar) {
                     this.advance();
@@ -115,94 +115,7 @@ class Lexer {
     }
 }
 
-class Interpreter {
-    constructor(lexer) {
-        this.lexer = lexer;
-        this.currentToken = this.lexer.getNextToken();
-        this.error = () => {
-            throw Error("invalid syntax");
-        };
-        this.eat = (tokenType) => {
-            if (this.debug)
-                console.log(`eat ${tokenType}`);
-            if (this.currentToken.type == tokenType) {
-                if (this.debug)
-                    console.log("EAT", this.currentToken, tokenType);
-                this.currentToken = this.lexer.getNextToken();
-            } else {
-                this.error();
-            }
-        };
-        this.factor = () => {
-            // factor : INTEGER | LPAREN expr RPAREN
-            let token = this.currentToken;
-            if (this.debug)
-                console.log(`factor : ${token}`);
-            if (token.type === INTEGER) {
-                this.eat(INTEGER);
-                return token.value;
-            } else if (token.type === LPAREN) {
-                this.eat(LPAREN);
-                result = this.expr();
-                this.eat(RPAREN);
-                return result;
-            }
-        };
-        this.term = () => {
-            let result = this.factor();
-            /**
-             * while this.current_token.type in (MUL, DIV):
-             * token = this.current_token
-             * if token.type == MUL
-             */
-            while (this.currentToken.type === MUL || this.currentToken.type === DIV) {
-                let token = this.currentToken;
-                switch (token.type) {
-                    case MUL:
-                        this.eat(MUL);
-                        result = result * this.factor();
-                        break;
-                    case DIV:
-                        this.eat(DIV);
-                        result = result / this.factor();
-                        break;
-                    default:
-                        console.log("term default", this.currentToken);
-                        break;
-                }
-            }
-            return result;
-        };
-        this.expr = () => {
-            /**
-             * -> 14 + 2 * 3 - 6 / 2
-             *
-             * expr : term ((PLUS | MINUS) term)*
-             * term : factor ((MUL | DIV) factor)*
-             * factor : INTEGER
-             */
-            let result = this.term();
-            if (this.debug)
-                console.log(`expr : ${result}`);
-            while (this.currentToken.type === PLUS || this.currentToken.type === MINUS) {
-                let token = this.currentToken;
-                if (this.debug)
-                    console.log(`expr loop: ${result}`);
-                switch (token.type) {
-                    case PLUS:
-                        this.eat(PLUS);
-                        result = result + this.term();
-                        break;
-                    case MINUS:
-                        this.eat(MINUS);
-                        result = result - this.term();
-                        break;
-                }
-            }
-            return result;
-        };
-    }
-}
+
 
 class AST {
     constructor() {}
@@ -235,6 +148,13 @@ class Num extends AST {
         this.type = "Num";
     }
 }
+class ID extends AST {
+    constructor(token) {
+        super();
+        this.value = token.value;
+        this.type = "Id";
+    }
+}
 class Var extends AST {
     constructor(token) {
         super();
@@ -259,11 +179,13 @@ const MUL = "MUL";
 const DIV = "DIV";
 const PLUS = "PLUS";
 const MINUS = "MINUS";
-const ID = "ID";
+const IDENTIFIER = "ID";
 const ASSIGN = "ASSIGN";
+const OPERATOR="OPERATOR";
+const EOF = "EOF";
 /**
  * expression      ::= factor | expression operator expression
- * factor          ::= number | identifier | assignment | '(' expression ')'
+ * factor          ::= INTEGER | identifier | assignment | '(' expression ')'
  * assignment      ::= identifier '=' expression
  * operator        ::= '+' | '-' | '*' | '/' | '%'
  * identifier      ::= letter | '_' { identifier-char }
@@ -273,7 +195,98 @@ const ASSIGN = "ASSIGN";
  * digit           ::= '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9'
  */
 
-class Parser {
+class AbstractParser {
+    constructor(lexer, debug) {
+        this.lexer = lexer;
+        this.currentToken = this.lexer.getNextToken();
+        this.debug = debug;
+    }
+
+    error() {
+        throw Error("invalid syntax");
+    }
+
+    eat(tokenType) {
+        if (this.currentToken.type === tokenType) {
+            this.currentToken = this.lexer.getNextToken();
+            return
+        }
+        this.error();
+    }
+}
+
+class Parser extends AbstractParser {
+    constructor(lexer, debug) {
+        super(lexer, debug);
+    }
+
+    factor() {
+        /**
+         * factor   : number
+         *          | identifier
+         *          | assignment
+         *          | LPAREN expression RPAREN
+         */
+        let token = this.currentToken;
+        let node;
+        if(token.type === INTEGER) {
+            this.eat(INTEGER);
+             node = new Num(token);
+            return node
+        } else if (token.type === IDENTIFIER) {
+            this.eat(IDENTIFIER);
+             node = new ID(token);
+            return node;
+        } else if (token.type === ASSIGN) {
+            let id = token;
+            this.eat(ID);
+            return AssignOp(node, this.factor());
+        } else if (token.type === LPAREN) {
+            this.eat(LPAREN);
+            node = this.expression();
+            this.eat(RPAREN);
+            return node;
+        }
+        return node;
+        
+    }
+    expression() {
+        /**
+         * expression   : factor
+         *              | expression OPERATOR expression
+         */
+        console.log(`expression ${this.currentToken}`)
+        let node = this.factor();
+        if (this.currentToken.type === OPERATOR) {
+            let token = this.currentToken;
+            this.eat(OPERATOR);
+            return new BinOp(node,token, this.expression())
+        }
+        return node;
+
+    }
+
+    parse() {
+        /**
+         * expression      ::= factor | expression operator expression
+         * factor          ::= number | identifier | assignment | '(' expression ')'
+         * assignment      ::= identifier '=' expression
+         * operator        ::= '+' | '-' | '*' | '/' | '%'
+         * identifier      ::= letter | '_' { identifier-char }
+         * identifier-char ::= '_' | letter | digit
+         * number          ::= { digit } [ '.' digit { digit } ]
+         * letter          ::= 'a' | 'b' | ... | 'y' | 'z' | 'A' | 'B' | ... | 'Y' | 'Z'
+         * digit           ::= '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9'
+         */
+        let node = this.expression();
+        console.log(typeof(node), node);
+        if(this.currentToken.type !== EOF) {
+            this.error();
+        }
+        return node;
+    }
+}
+class Parser1 {
     constructor(lexer, debug) {
         this.lexer = lexer;
         this.debug = debug;
@@ -313,6 +326,7 @@ class Parser {
          *          | MINUS factor
          *          | INTEGER 
          *          | LPAREN expr RPAREN
+         *          | variable
          */
 
         let token = this.currentToken;
@@ -335,62 +349,68 @@ class Parser {
             this.eat(RPAREN);
             return node;
         }
+        /*  else {
+                    let node = this.identifier();
+                    return node;
+                } */
     }
-
+    expr() {
+        /**
+         * expr : term ((PLUS | MINUS) term)*
+         * term : factor ((MUL | DIV) factor)*
+         * factor: INTEGER | LPAREN expr RPAREN
+         */
+        let node = this.term();
+        while (this.currentToken.type === PLUS ||
+            this.currentToken.type === MINUS) {
+            let token = this.currentToken;
+            if (token.type === PLUS) {
+                this.eat(PLUS);
+            } else if (token.type === MINUS) {
+                this.eat(MINUS);
+            }
+            node = new BinOp(node, token, this.term());
+        }
+        return node;
+    }
     identifier() {
-        let token = this.currentToken;
-        while (token.type === ID) {
-            this.eat(ID);
+        while (this.currentToken.type === ID) {
+            let token = this.currentToken;
+            this.eat(ID)
             return new Var(token);
         }
     }
     assignment() {
-        // assignment : identifier ASSIGN expr
-        let node = this.identifier();
+        /**
+         * assignment   :   identifier ASSIGN expr
+         */
+        let variable = this.identifier();
+        if (this.debug) console.log(`assignment ${JSON.stringify(variable)}`);
         while (this.currentToken.type === ASSIGN) {
             let token = this.currentToken;
             this.eat(ASSIGN);
-            return new AssignOp(node, token, this.expr());
+            return new AssignOp(variable, token, this.expr());
         }
-        return node;
+        return undefined;
     }
-
-    expr() {
+    statement() {
         /**
-         * 
-         * expr :   assignment 
-         *      | term ((PLUS | MINUS) term)* 
-         * assignment : identifier ASSIGN expr
-         * term : factor ((MUL | DIV) factor)*
-         * factor : INTEGER | LPAREN expr RPAREN
+         * statement: expr
+         *          | assignment
          */
-        let node = this.assignment();
-        
-        //let node = this.term();
-/*         if (node !== null || node !== undefined) {
-            while (this.currentToken.type === PLUS ||
-                this.currentToken.type === MINUS) {
-                let token = this.currentToken;
-                if (token.type === PLUS) {
-                    this.eat(PLUS);
-                } else if (token.type === MINUS) {
-                    this.eat(MINUS);
-                }
-                node = new BinOp(node, token, this.term());
-            }
-        } */
-        /*         if (node === undefined || node === null) {
-                    console.log("Look for assignment");
-                    node = this.assignment();
-                } */
-        return node;
+
+        let node = this.expr();;
+        if (node !== undefined) {
+            return node;
+        } else {
+            return this.assignment()
+        }
     }
     parse() {
         /**
          * statement    :  expr
          */
         let node = this.expr();
-        console.log("parse expr -> ", JSON.stringify(node));
         if (this.currentToken.type !== "EOF") {
             this.error();
         }
@@ -403,7 +423,7 @@ class NodeVisitor {
     visit(node) {
         let methodName = `visit_${node.type}`;
         /* if (this.debug)  */
-        console.log(`visit ${methodName}`);
+        console.log(`visit ${methodName} ${node.value}`);
         try {
             return this[methodName].call(this, node);
         } catch (e) {
@@ -421,10 +441,14 @@ class InterpreterVisitor extends NodeVisitor {
     constructor(parser) {
         super();
         this.parser = parser;
-        this.interpret = () => {
-            let tree = this.parser.parse();
-            return this.visit(tree);
-        };
+        this.vars = {};
+    }
+    addParser(newParser) {
+        this.parser = newParser;
+    }
+    interpret() {
+        let tree = this.parser.parse();
+        return this.visit(tree);
     }
     visit_BinOp(node) {
         if (this.debug)
@@ -437,8 +461,6 @@ class InterpreterVisitor extends NodeVisitor {
             return this.visit(node.left) * this.visit(node.right);
         } else if (node.op.type === DIV) {
             return this.visit(node.left) / this.visit(node.right);
-        } else if (node.op.type === ASSIGN) {
-            return this.visit_AssignOp.call(this, node);
         }
     }
     visit_Num(node) {
@@ -452,15 +474,22 @@ class InterpreterVisitor extends NodeVisitor {
             return -this.visit(node.expr);
         }
     }
+    visit_Var(node) {
+        let variableName = node.value;
+        if (this.vars.hasOwnProperty(variableName)) {
+            return this.vars.variableName;
+        } else {
+            throw Error(`${variableName} not defined`)
+        }
+    }
     visit_AssignOp(node) {
-        console.log("Assignment FOO ", node);
-
+        this.vars[node.left.value] = this.visit(node.right);
     }
 }
 /* InterpreterVisitor.prototype = Object.create(NodeVisitor.prototype);
 InterpreterVisitor.prototype.constructor = InterpreterVisitor;
  */ // unit test
-let lexer = new Lexer("x = 1", true);
+
 /* let token = lexer.getNextToken();
 while(token.type !== "EOF") {
     console.log(token);
@@ -473,9 +502,18 @@ console.assert(lexer.getNextToken().type === INTEGER, "expected INTEGER");
  */
 // let interpreter = new Interpreter(lexer);
 // let finish = interpreter.expr();
-
+/* let lexer = new Lexer("1 + 2 + 3 + 4", true);
 let parser = new Parser(lexer);
-parser.parse();
 let interpreterVisitor = new InterpreterVisitor(parser);
+interpreterVisitor.interpret();
+//interpreterVisitor.addParser(new Parser(new Lexer("1 + 2 + 3 + 4")));
+
 let visitorResult = interpreterVisitor.interpret();
 console.log(visitorResult);
+
+ */
+let lexer = new Lexer("a = 100");
+let parser = new Parser(lexer);
+let parserResult = parser.parse();
+
+console.log(JSON.stringify(parserResult, null, 2));
